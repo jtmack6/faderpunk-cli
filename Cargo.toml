@@ -1,0 +1,15 @@
+[package]
+name = "faderpunk-cli"
+version = "0.1.0"
+edition = "2024"
+description = "CLI tool for configuring the Faderpunk controller over USB"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+nusb = "0.1"
+postcard = { version = "1.1", features = ["alloc"] }
+cobs = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tokio = { version = "1", features = ["full"] }
