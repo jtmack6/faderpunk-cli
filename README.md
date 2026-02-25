@@ -69,6 +69,17 @@ The Faderpunk exposes a vendor-class USB interface that speaks the same protocol
 
 The protocol types in `src/protocol.rs` mirror the firmware's `libfp` crate. They must stay in sync with the firmware — same enum variant order, same field order, same types.
 
+## Terminal output
+
+The CLI uses truecolor output matching the Faderpunk's actual LED colors, with:
+
+- Colored fader strip visualization showing app layout with box drawing
+- Unicode icons for each app type (↕ Fader, ∿ Sine, ♪ Note, ⚄ Die, ≈ Random, etc.)
+- Formatted values for MIDI (CC/channel/ports), voltage ranges, and booleans
+- Section headers and dimmed labels for clean, scannable output
+
+Requires a terminal with truecolor support (iTerm2, kitty, WezTerm, Windows Terminal, etc.).
+
 ## Project structure
 
 ```
@@ -76,7 +87,7 @@ src/
 ├── main.rs       # CLI entry point (clap commands)
 ├── protocol.rs   # Protocol types mirroring libfp
 ├── usb.rs        # USB transport (nusb + COBS framing)
-└── display.rs    # Terminal output formatting
+└── display.rs    # Colored terminal output and fader visualization
 ```
 
 ## Requirements
