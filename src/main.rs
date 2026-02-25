@@ -64,6 +64,23 @@ enum Commands {
         /// Shell to generate for (bash, zsh, fish, elvish, powershell)
         shell: Shell,
     },
+
+    /// Output completion values (hidden, used by shell completions)
+    #[command(hide = true)]
+    Complete {
+        #[command(subcommand)]
+        what: CompleteTarget,
+    },
+}
+
+#[derive(Subcommand)]
+enum CompleteTarget {
+    /// List app names (one per line, tab-separated with description)
+    Apps,
+    /// List slot numbers with current occupant
+    Slots,
+    /// List param names for a given slot
+    Params { slot: u8 },
 }
 
 #[derive(Subcommand)]
@@ -164,15 +181,8 @@ async fn main() -> Result<()> {
         Commands::Config { action } => cmd_config(action).await,
         Commands::Save { path } => cmd_save(&path).await,
         Commands::Load { path } => cmd_load(&path).await,
-        Commands::Completions { shell } => {
-            clap_complete::generate(
-                shell,
-                &mut Cli::command(),
-                "faderpunk-cli",
-                &mut std::io::stdout(),
-            );
-            Ok(())
-        }
+        Commands::Completions { shell } => cmd_completions(shell),
+        Commands::Complete { what } => cmd_complete(what).await,
     }
 }
 
@@ -185,6 +195,111 @@ async fn cmd_ping() -> Result<()> {
         other => println!("Unexpected response: {:?}", other),
     }
     Ok(())
+}
+
+fn cmd_completions(shell: Shell) -> Result<()> {
+    clap_complete::generate(
+        shell,
+        &mut Cli::command(),
+        "faderpunk-cli",
+        &mut std::io::stdout(),
+    );
+    Ok(())
+}
+
+async fn cmd_complete(what: CompleteTarget) -> Result<()> {
+    // Silently fail if device isn't connected — completions shouldn't error
+    let dev = FaderpunkDevice::open();
+    if dev.is_err() {
+        // Fall back to static values when device is disconnected
+        match what {
+            CompleteTarget::Slots => {
+                for i in 1..=16 {
+                    println!("{}", i);
+                }
+            }
+            _ => {} // Can't list apps/params without device
+        }
+        return Ok(());
+    }
+    let mut dev = dev.unwrap();
+
+    match what {
+        CompleteTarget::Apps => {
+            let responses = dev.send_receive_batch(&ConfigMsgIn::GetAllApps).await?;
+            for resp in responses {
+                if let ConfigMsgOut::AppConfig(app_id, channels, (_, name, desc, _, _, _)) = resp {
+                    // Tab-separated: value\tdescription (fish format)
+                    println!("{}\t[{}] {} ch — {}", name, app_id, channels, desc);
+                }
+            }
+        }
+        CompleteTarget::Slots => {
+            let app_info = fetch_app_info(&mut dev).await.unwrap_or_default();
+            let layout = fetch_layout(&mut dev).await?;
+            let entries = layout_entries(&layout);
+
+            for i in 1..=16u8 {
+                let desc = if let Some(entry) = find_entry_at_slot(&entries, i) {
+                    let name = app_info
+                        .iter()
+                        .find(|a| a.app_id == entry.app_id)
+                        .map(|a| a.name.as_str())
+                        .unwrap_or("?");
+                    // Only show the label on the first fader of each app
+                    if i as usize == entry.start + 1 {
+                        format!("{}", name)
+                    } else {
+                        format!("{} (cont.)", name)
+                    }
+                } else {
+                    "empty".to_string()
+                };
+                println!("{}\t{}", i, desc);
+            }
+        }
+        CompleteTarget::Params { slot } => {
+            if slot < 1 || slot > 16 {
+                return Ok(());
+            }
+            let app_info = fetch_app_info(&mut dev).await.unwrap_or_default();
+            let layout = fetch_layout(&mut dev).await?;
+            let entries = layout_entries(&layout);
+
+            if let Some(entry) = find_entry_at_slot(&entries, slot) {
+                if let Some(app) = app_info.iter().find(|a| a.app_id == entry.app_id) {
+                    for (i, param) in app.params.iter().enumerate() {
+                        let name = display::get_param_name(param);
+                        if !name.is_empty() {
+                            println!("{}\t[{}] {}", name, i, format_param_type(param));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn format_param_type(param: &Param) -> &'static str {
+    match param {
+        Param::None => "",
+        Param::Int { .. } => "integer",
+        Param::Float { .. } => "number",
+        Param::Bool { .. } => "bool",
+        Param::Enum { .. } => "enum",
+        Param::Curve { .. } => "curve",
+        Param::Waveform { .. } => "waveform",
+        Param::Color { .. } => "color",
+        Param::Range { .. } => "range",
+        Param::Note { .. } => "note",
+        Param::MidiCc { .. } => "CC 0-127",
+        Param::MidiChannel { .. } => "channel 1-16",
+        Param::MidiIn => "midi in",
+        Param::MidiMode => "note/cc",
+        Param::MidiNote { .. } => "note 0-127",
+        Param::MidiOut => "midi out",
+    }
 }
 
 async fn cmd_status() -> Result<()> {

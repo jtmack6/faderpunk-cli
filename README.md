@@ -38,6 +38,29 @@ faderpunk-cli layout      # show which app is assigned to each fader
 faderpunk-cli params      # show current parameters for all running apps
 ```
 
+### Edit the layout
+
+```bash
+faderpunk-cli layout set 5 Fader         # assign Fader app to slot 5
+faderpunk-cli layout set 1 LFO --force   # skip confirmation for multi-channel apps
+faderpunk-cli layout remove 8            # remove app from slot 8
+faderpunk-cli layout fill Control        # fill all 16 faders with one app
+faderpunk-cli layout clear               # clear entire layout
+```
+
+Destructive operations prompt for confirmation, showing which apps will be displaced. Use `-f`/`--force` to skip.
+
+### Set app parameters
+
+```bash
+faderpunk-cli param show                 # show params for all running apps
+faderpunk-cli param show 8               # show params for app at slot 8
+faderpunk-cli param set 8 Waveform sine  # set a parameter by name
+faderpunk-cli param set 1 CC 10          # set MIDI CC number
+```
+
+Parameter names use fuzzy matching — `bpm`, `BPM`, and `Bpm` all work.
+
 ### Change settings
 
 ```bash
@@ -79,6 +102,18 @@ The CLI uses truecolor output matching the Faderpunk's actual LED colors, with:
 - Section headers and dimmed labels for clean, scannable output
 
 Requires a terminal with truecolor support (iTerm2, kitty, WezTerm, Windows Terminal, etc.).
+
+## Shell completions
+
+Generate static completions for your shell:
+
+```bash
+faderpunk-cli completions fish > ~/.config/fish/completions/faderpunk-cli.fish
+faderpunk-cli completions bash > /etc/bash_completion.d/faderpunk-cli
+faderpunk-cli completions zsh > ~/.zfunc/_faderpunk-cli
+```
+
+The fish completions include dynamic device-aware completions — tab-completing `layout set <slot>` shows which apps occupy each fader, and `layout set 5 <app>` lists available apps from the connected device. When no device is connected, completions fall back to static values.
 
 ## Project structure
 
