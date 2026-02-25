@@ -108,20 +108,33 @@ async fn cmd_status() -> Result<()> {
     // Get global config
     let config_resp = dev.send_receive(&ConfigMsgIn::GetGlobalConfig).await?;
     if let ConfigMsgOut::GlobalConfig(config) = config_resp {
-        println!("Global Config:");
         display::print_global_config(&config);
     }
 
     println!();
 
+    // Get apps (for colors/names in layout)
+    let app_info = fetch_app_info(&mut dev).await?;
+
     // Get layout
     let layout_resp = dev.send_receive(&ConfigMsgIn::GetLayout).await?;
     if let ConfigMsgOut::Layout(layout) = layout_resp {
-        println!("Layout:");
-        display::print_layout(&layout);
+        display::print_layout(&layout, Some(&app_info));
     }
 
     Ok(())
+}
+
+/// Fetch app metadata from device for use in display functions.
+async fn fetch_app_info(dev: &mut FaderpunkDevice) -> Result<Vec<display::AppInfo>> {
+    let responses = dev.send_receive_batch(&ConfigMsgIn::GetAllApps).await?;
+    let mut info = Vec::new();
+    for resp in responses {
+        if let ConfigMsgOut::AppConfig(app_id, _, (_, name, _, color, icon, _)) = resp {
+            info.push(display::AppInfo { app_id, name, color, icon });
+        }
+    }
+    Ok(info)
 }
 
 async fn cmd_apps() -> Result<()> {
@@ -135,18 +148,17 @@ async fn cmd_apps() -> Result<()> {
         }
     }
 
-    println!("Available apps ({}):", apps.len());
     display::print_app_list(&apps);
     Ok(())
 }
 
 async fn cmd_layout() -> Result<()> {
     let mut dev = FaderpunkDevice::open()?;
+    let app_info = fetch_app_info(&mut dev).await?;
     let resp = dev.send_receive(&ConfigMsgIn::GetLayout).await?;
 
     if let ConfigMsgOut::Layout(layout) = resp {
-        println!("Current layout:");
-        display::print_layout(&layout);
+        display::print_layout(&layout, Some(&app_info));
     }
 
     Ok(())
@@ -173,7 +185,6 @@ async fn cmd_config(action: ConfigAction) -> Result<()> {
         ConfigAction::Show => {
             let resp = dev.send_receive(&ConfigMsgIn::GetGlobalConfig).await?;
             if let ConfigMsgOut::GlobalConfig(config) = resp {
-                println!("Global Config:");
                 display::print_global_config(&config);
             }
         }
