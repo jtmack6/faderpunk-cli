@@ -5,7 +5,8 @@ mod usb;
 use std::io::{Write, BufRead};
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::Shell;
 
 use protocol::{ConfigMsgIn, ConfigMsgOut, Param, Value, APP_MAX_PARAMS, GLOBAL_CHANNELS};
 use usb::FaderpunkDevice;
@@ -56,6 +57,12 @@ enum Commands {
     Load {
         /// Input file path
         path: String,
+    },
+
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate for (bash, zsh, fish, elvish, powershell)
+        shell: Shell,
     },
 }
 
@@ -157,6 +164,15 @@ async fn main() -> Result<()> {
         Commands::Config { action } => cmd_config(action).await,
         Commands::Save { path } => cmd_save(&path).await,
         Commands::Load { path } => cmd_load(&path).await,
+        Commands::Completions { shell } => {
+            clap_complete::generate(
+                shell,
+                &mut Cli::command(),
+                "faderpunk-cli",
+                &mut std::io::stdout(),
+            );
+            Ok(())
+        }
     }
 }
 
