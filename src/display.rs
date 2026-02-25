@@ -152,12 +152,22 @@ fn clock_div_value(div: &ClockDivision) -> &'static str {
 
 // ── Layout (visual fader strip) ──
 
-/// App info needed to render the layout visually
+/// App info needed to render layout and params.
 pub struct AppInfo {
     pub app_id: u8,
+    pub channels: usize,
     pub name: String,
     pub color: Color,
     pub icon: AppIcon,
+    pub params: Vec<Param>,
+}
+
+/// A resolved layout entry with app info for params display.
+pub struct LayoutEntry {
+    pub start: usize,
+    pub size: usize,
+    pub app_id: u8,
+    pub layout_id: u8,
 }
 
 /// Print the layout as a visual fader strip.
@@ -306,17 +316,100 @@ pub fn print_app_list(apps: &[(u8, usize, String, String, Color, AppIcon)]) {
 
 // ── App params ──
 
-pub fn print_app_params(layout_id: u8, values: &[Value]) {
-    println!(
-        "  {} App {}",
-        "▸".dimmed(),
-        format!("(layout_id={})", layout_id).dimmed()
-    );
+/// Print parameters for an app, with names from metadata when available.
+pub fn print_app_params(
+    layout_id: u8,
+    values: &[Value],
+    layout_entries: Option<&[LayoutEntry]>,
+    apps: Option<&[AppInfo]>,
+) {
+    // Resolve the app name, color, and param metadata via layout_id → app_id → AppInfo
+    let (app_name, color, param_meta, fader_range) =
+        if let (Some(entries), Some(apps)) = (layout_entries, apps) {
+            if let Some(entry) = entries.iter().find(|e| e.layout_id == layout_id) {
+                let info = apps.iter().find(|a| a.app_id == entry.app_id);
+                let name = info.map(|i| i.name.clone()).unwrap_or_else(|| format!("App {}", entry.app_id));
+                let color = info.map(|i| i.color).unwrap_or(Color::White);
+                let params = info.map(|i| i.params.as_slice());
+                let range = if entry.size == 1 {
+                    format!("fader {}", entry.start + 1)
+                } else {
+                    format!("faders {}-{}", entry.start + 1, entry.start + entry.size)
+                };
+                (name, color, params, range)
+            } else {
+                (format!("layout_id={}", layout_id), Color::White, None, String::new())
+            }
+        } else {
+            (format!("layout_id={}", layout_id), Color::White, None, String::new())
+        };
+
+    let style = style_for_color(&color);
+    let dot = "●".style(style);
+    let range_str = if fader_range.is_empty() {
+        String::new()
+    } else {
+        format!(" {}", format!("({})", fader_range).dimmed())
+    };
+    println!("  {} {} {}{}", "▸".dimmed(), dot, app_name.bold(), range_str);
+
+    // Find the longest param name for alignment
+    let max_name_len = if let Some(params) = param_meta {
+        values
+            .iter()
+            .enumerate()
+            .map(|(i, _)| param_name(params.get(i)).len())
+            .max()
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
     for (i, val) in values.iter().enumerate() {
         let formatted = format_value(val);
-        println!("    {:>2}  {}", format!("{}.", i).dimmed(), formatted);
+        if let Some(params) = param_meta {
+            let name = param_name(params.get(i));
+            if name.is_empty() {
+                println!("    {:>2}  {}", format!("{}.", i).dimmed(), formatted);
+            } else {
+                println!(
+                    "    {:<width$}  {}",
+                    format!("{}:", name).dimmed(),
+                    formatted,
+                    width = max_name_len + 1
+                );
+            }
+        } else {
+            println!("    {:>2}  {}", format!("{}.", i).dimmed(), formatted);
+        }
     }
     println!();
+}
+
+/// Extract the human-readable name from a Param definition.
+pub fn get_param_name(param: &Param) -> String {
+    param_name(Some(param))
+}
+
+fn param_name(param: Option<&Param>) -> String {
+    match param {
+        Some(Param::None) | None => String::new(),
+        Some(Param::Int { name, .. }) => name.clone(),
+        Some(Param::Float { name, .. }) => name.clone(),
+        Some(Param::Bool { name }) => name.clone(),
+        Some(Param::Enum { name, .. }) => name.clone(),
+        Some(Param::Curve { name, .. }) => name.clone(),
+        Some(Param::Waveform { name, .. }) => name.clone(),
+        Some(Param::Color { name, .. }) => name.clone(),
+        Some(Param::Range { name, .. }) => name.clone(),
+        Some(Param::Note { name, .. }) => name.clone(),
+        Some(Param::MidiCc { name }) => name.clone(),
+        Some(Param::MidiChannel { name }) => name.clone(),
+        Some(Param::MidiIn) => "MIDI In".to_string(),
+        Some(Param::MidiMode) => "MIDI Mode".to_string(),
+        Some(Param::MidiNote { name }) => name.clone(),
+        Some(Param::MidiOut) => "MIDI Out".to_string(),
+    }
 }
 
 fn format_value(val: &Value) -> String {
