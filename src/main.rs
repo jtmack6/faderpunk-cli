@@ -2,6 +2,8 @@ mod display;
 mod protocol;
 mod usb;
 
+use std::io::{Write, BufRead};
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
@@ -68,21 +70,34 @@ enum LayoutAction {
         slot: u8,
         /// App name or ID (use 'apps' command to see available)
         app: String,
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        force: bool,
     },
 
     /// Remove an app from a fader slot
     Remove {
         /// Fader slot number (1-16)
         slot: u8,
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        force: bool,
     },
 
     /// Clear the entire layout
-    Clear,
+    Clear {
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        force: bool,
+    },
 
     /// Fill all 16 faders with a single app
     Fill {
         /// App name or ID
         app: String,
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        force: bool,
     },
 }
 
@@ -276,6 +291,46 @@ fn validate_slot(slot: u8) -> Result<()> {
     Ok(())
 }
 
+/// Prompt the user for confirmation. Returns true if they accept.
+fn confirm(message: &str) -> bool {
+    print!("{} [y/N] ", message);
+    std::io::stdout().flush().ok();
+    let mut input = String::new();
+    if std::io::stdin().lock().read_line(&mut input).is_err() {
+        return false;
+    }
+    matches!(input.trim().to_lowercase().as_str(), "y" | "yes")
+}
+
+/// Describe apps that would be displaced by placing an app at idx..end.
+fn describe_displaced(
+    layout: &protocol::Layout,
+    idx: usize,
+    end: usize,
+    app_info: &[display::AppInfo],
+) -> Vec<String> {
+    let mut displaced = Vec::new();
+    for i in 0..GLOBAL_CHANNELS {
+        if let Some((app_id, ch, _)) = layout.0[i] {
+            let app_end = i + ch;
+            if i < end && app_end > idx {
+                let name = app_info
+                    .iter()
+                    .find(|a| a.app_id == app_id)
+                    .map(|a| a.name.as_str())
+                    .unwrap_or("unknown");
+                let range = if ch == 1 {
+                    format!("fader {}", i + 1)
+                } else {
+                    format!("faders {}-{}", i + 1, i + ch)
+                };
+                displaced.push(format!("{} ({})", name, range));
+            }
+        }
+    }
+    displaced
+}
+
 // ── Apps ──
 
 async fn cmd_apps() -> Result<()> {
@@ -298,10 +353,10 @@ async fn cmd_apps() -> Result<()> {
 async fn cmd_layout(action: Option<LayoutAction>) -> Result<()> {
     match action.unwrap_or(LayoutAction::Show) {
         LayoutAction::Show => layout_show().await,
-        LayoutAction::Set { slot, app } => layout_set(slot, &app).await,
-        LayoutAction::Remove { slot } => layout_remove(slot).await,
-        LayoutAction::Clear => layout_clear().await,
-        LayoutAction::Fill { app } => layout_fill(&app).await,
+        LayoutAction::Set { slot, app, force } => layout_set(slot, &app, force).await,
+        LayoutAction::Remove { slot, force } => layout_remove(slot, force).await,
+        LayoutAction::Clear { force } => layout_clear(force).await,
+        LayoutAction::Fill { app, force } => layout_fill(&app, force).await,
     }
 }
 
@@ -313,7 +368,7 @@ async fn layout_show() -> Result<()> {
     Ok(())
 }
 
-async fn layout_set(slot: u8, app_name: &str) -> Result<()> {
+async fn layout_set(slot: u8, app_name: &str, force: bool) -> Result<()> {
     validate_slot(slot)?;
     let mut dev = FaderpunkDevice::open()?;
     let app_info = fetch_app_info(&mut dev).await?;
@@ -333,11 +388,23 @@ async fn layout_set(slot: u8, app_name: &str) -> Result<()> {
 
     let mut layout = fetch_layout(&mut dev).await?;
 
+    // Check what would be displaced
+    let displaced = describe_displaced(&layout, idx, end, &app_info);
+    if !displaced.is_empty() && !force {
+        println!("This will displace:");
+        for d in &displaced {
+            println!("  - {}", d);
+        }
+        if !confirm("Continue?") {
+            println!("Cancelled.");
+            return Ok(());
+        }
+    }
+
     // Clear any existing apps that overlap with the new placement
     for i in 0..GLOBAL_CHANNELS {
         if let Some((_, ch, _)) = layout.0[i] {
             let app_end = i + ch;
-            // If this existing app overlaps with our target range, remove it
             if i < end && app_end > idx {
                 layout.0[i] = None;
             }
@@ -376,7 +443,7 @@ async fn layout_set(slot: u8, app_name: &str) -> Result<()> {
     Ok(())
 }
 
-async fn layout_remove(slot: u8) -> Result<()> {
+async fn layout_remove(slot: u8, force: bool) -> Result<()> {
     validate_slot(slot)?;
     let mut dev = FaderpunkDevice::open()?;
     let app_info = fetch_app_info(&mut dev).await?;
@@ -389,6 +456,19 @@ async fn layout_remove(slot: u8) -> Result<()> {
             .find(|a| a.app_id == entry.app_id)
             .map(|a| a.name.as_str())
             .unwrap_or("unknown");
+
+        if !force {
+            let range = if entry.size == 1 {
+                format!("fader {}", entry.start + 1)
+            } else {
+                format!("faders {}-{}", entry.start + 1, entry.start + entry.size)
+            };
+            if !confirm(&format!("Remove {} from {}?", name, range)) {
+                println!("Cancelled.");
+                return Ok(());
+            }
+        }
+
         layout.0[entry.start] = None;
         let validated = send_layout(&mut dev, layout).await?;
         println!("Removed {} from fader {}", name, slot);
@@ -401,18 +481,73 @@ async fn layout_remove(slot: u8) -> Result<()> {
     Ok(())
 }
 
-async fn layout_clear() -> Result<()> {
+async fn layout_clear(force: bool) -> Result<()> {
     let mut dev = FaderpunkDevice::open()?;
+
+    if !force {
+        let app_info = fetch_app_info(&mut dev).await?;
+        let layout = fetch_layout(&mut dev).await?;
+        let entries = layout_entries(&layout);
+
+        if !entries.is_empty() {
+            println!("Current layout has {} app(s):", entries.len());
+            for entry in &entries {
+                let name = app_info
+                    .iter()
+                    .find(|a| a.app_id == entry.app_id)
+                    .map(|a| a.name.as_str())
+                    .unwrap_or("unknown");
+                let range = if entry.size == 1 {
+                    format!("fader {}", entry.start + 1)
+                } else {
+                    format!("faders {}-{}", entry.start + 1, entry.start + entry.size)
+                };
+                println!("  - {} ({})", name, range);
+            }
+            if !confirm("Clear all?") {
+                println!("Cancelled.");
+                return Ok(());
+            }
+        }
+    }
+
     let layout = protocol::Layout([None; GLOBAL_CHANNELS]);
     send_layout(&mut dev, layout).await?;
     println!("Layout cleared — all faders empty");
     Ok(())
 }
 
-async fn layout_fill(app_name: &str) -> Result<()> {
+async fn layout_fill(app_name: &str, force: bool) -> Result<()> {
     let mut dev = FaderpunkDevice::open()?;
     let app_info = fetch_app_info(&mut dev).await?;
     let (app_id, channels) = resolve_app(app_name, &app_info)?;
+
+    if !force {
+        let layout = fetch_layout(&mut dev).await?;
+        let entries = layout_entries(&layout);
+
+        if !entries.is_empty() {
+            println!("This will replace the current layout ({} app(s)):", entries.len());
+            for entry in &entries {
+                let name = app_info
+                    .iter()
+                    .find(|a| a.app_id == entry.app_id)
+                    .map(|a| a.name.as_str())
+                    .unwrap_or("unknown");
+                let range = if entry.size == 1 {
+                    format!("fader {}", entry.start + 1)
+                } else {
+                    format!("faders {}-{}", entry.start + 1, entry.start + entry.size)
+                };
+                println!("  - {} ({})", name, range);
+            }
+            let app = app_info.iter().find(|a| a.app_id == app_id).unwrap();
+            if !confirm(&format!("Fill all faders with {}?", app.name)) {
+                println!("Cancelled.");
+                return Ok(());
+            }
+        }
+    }
 
     let mut layout = protocol::Layout([None; GLOBAL_CHANNELS]);
     let mut pos = 0usize;
