@@ -103,6 +103,7 @@ pub enum Key {
     Japanese,
     Gamelan,
     HungarianMin,
+    Off,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -184,10 +185,16 @@ pub enum MidiMode {
     Cc,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum VoltPerOct {
+    Standard,
+    Buchla,
+}
+
 // ── Newtype wrappers ──
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct MidiCc(pub u8);
+pub struct MidiCc(pub u16);
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MidiChannel(pub u8);
@@ -221,6 +228,7 @@ pub struct ClockConfig {
     pub ext_ppqn: u8,
     pub reset_src: ResetSrc,
     pub internal_bpm: f32,
+    pub swing_amount: i8,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -268,6 +276,8 @@ pub enum Param {
     MidiMode,
     MidiNote { name: String },
     MidiOut,
+    MidiNrpn,
+    VoltPerOct,
 }
 
 // Value is the actual parameter value — sent and received
@@ -291,6 +301,8 @@ pub enum Value {
     MidiMode(MidiMode),
     MidiNote(MidiNote),
     MidiOut(MidiOut),
+    MidiNrpn(bool),
+    VoltPerOct(VoltPerOct),
 }
 
 // ── Wire messages ──

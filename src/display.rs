@@ -409,6 +409,8 @@ fn param_name(param: Option<&Param>) -> String {
         Some(Param::MidiMode) => "MIDI Mode".to_string(),
         Some(Param::MidiNote { name }) => name.clone(),
         Some(Param::MidiOut) => "MIDI Out".to_string(),
+        Some(Param::MidiNrpn) => "MIDI NRPN".to_string(),
+        Some(Param::VoltPerOct) => "V/Oct".to_string(),
     }
 }
 
@@ -460,5 +462,13 @@ fn format_value(val: &Value) -> String {
                 .collect::<Vec<_>>()
                 .join("+")
         }
+        Value::MidiNrpn(on) => {
+            if *on {
+                "NRPN ●".green().to_string()
+            } else {
+                "NRPN ○".dimmed().to_string()
+            }
+        }
+        Value::VoltPerOct(v) => format!("{:?}", v),
     }
 }

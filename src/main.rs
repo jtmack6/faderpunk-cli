@@ -299,6 +299,8 @@ fn format_param_type(param: &Param) -> &'static str {
         Param::MidiMode => "note/cc",
         Param::MidiNote { .. } => "note 0-127",
         Param::MidiOut => "midi out",
+        Param::MidiNrpn => "nrpn on/off",
+        Param::VoltPerOct => "v/oct std|buchla",
     }
 }
 
@@ -930,7 +932,7 @@ fn parse_value(s: &str, param: Option<&Param>, current: &Value) -> Result<Value>
             Ok(Value::Range(v))
         }
         Some(Param::MidiCc { .. }) => {
-            let v: u8 = s.parse().map_err(|_| anyhow::anyhow!("Expected 0-127"))?;
+            let v: u16 = s.parse().map_err(|_| anyhow::anyhow!("Expected 0-127"))?;
             if v > 127 {
                 anyhow::bail!("CC must be 0-127");
             }
@@ -965,6 +967,22 @@ fn parse_value(s: &str, param: Option<&Param>, current: &Value) -> Result<Value>
         Some(Param::MidiOut) => {
             let (usb, out1, out2) = parse_midi_ports_out(s)?;
             Ok(Value::MidiOut(protocol::MidiOut([usb, out1, out2])))
+        }
+        Some(Param::MidiNrpn) => {
+            let v = match s.to_lowercase().as_str() {
+                "true" | "on" | "1" | "yes" => true,
+                "false" | "off" | "0" | "no" => false,
+                _ => anyhow::bail!("Expected bool (true/false, on/off, 1/0)"),
+            };
+            Ok(Value::MidiNrpn(v))
+        }
+        Some(Param::VoltPerOct) => {
+            let v = match s.to_lowercase().as_str() {
+                "standard" | "std" | "1v" | "1v/oct" => protocol::VoltPerOct::Standard,
+                "buchla" | "1.2v" | "1.2v/oct" => protocol::VoltPerOct::Buchla,
+                _ => anyhow::bail!("Expected 'standard' or 'buchla'"),
+            };
+            Ok(Value::VoltPerOct(v))
         }
         Some(Param::Color { variants, .. }) => {
             let lower = s.to_lowercase();
