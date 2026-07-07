@@ -166,6 +166,12 @@ enum ConfigAction {
         /// Mode name
         mode: String,
     },
+
+    /// Set the clock source (internal, midiusb, midiin, atom, meteor, cube, none)
+    Clocksrc {
+        /// Source name
+        source: String,
+    },
 }
 
 #[tokio::main]
@@ -1122,6 +1128,27 @@ async fn cmd_config(action: ConfigAction) -> Result<()> {
                 config.takeover_mode = takeover;
                 dev.send(&ConfigMsgIn::SetGlobalConfig(config)).await?;
                 println!("Takeover mode set to {:?}", takeover);
+            }
+        }
+        ConfigAction::Clocksrc { source } => {
+            let src = match source.to_lowercase().replace(['-', '_'], "").as_str() {
+                "internal" => protocol::ClockSrc::Internal,
+                "midiusb" | "usb" => protocol::ClockSrc::MidiUsb,
+                "midiin" | "din" => protocol::ClockSrc::MidiIn,
+                "atom" => protocol::ClockSrc::Atom,
+                "meteor" => protocol::ClockSrc::Meteor,
+                "cube" => protocol::ClockSrc::Cube,
+                "none" | "off" => protocol::ClockSrc::None,
+                _ => anyhow::bail!(
+                    "Unknown clock source: {} (use: internal, midiusb, midiin, atom, meteor, cube, none)",
+                    source
+                ),
+            };
+            let resp = dev.send_receive(&ConfigMsgIn::GetGlobalConfig).await?;
+            if let ConfigMsgOut::GlobalConfig(mut config) = resp {
+                config.clock.clock_src = src;
+                dev.send(&ConfigMsgIn::SetGlobalConfig(config)).await?;
+                println!("Clock source set to {:?}", src);
             }
         }
     }
